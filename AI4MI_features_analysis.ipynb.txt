@@ -1,0 +1,955 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Features analysis tutorial"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "This tutorial shows how to perform an exploratory analysis of the features data: to visualize features distribution in classes, plot the feature correlation matrix, check Mann-Whitney U-test p-values, plot univariate ROC (and calculate AUC) for each feature, perform volumetric analysis, and save all the scores. We will use PyRadiomics features as variables and binary survival label as an outcome.  \n",
+    "Then we will clean the data and perform the basic radiomics pipeline."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Importing modules:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import os,sys\n",
+    "from pmtool.AnalysisBox import AnalysisBox\n",
+    "import pandas as pd\n",
+    "import numpy as np\n",
+    "import scipy.stats as stats\n",
+    "import matplotlib.pyplot as plt\n",
+    "from sklearn.preprocessing import StandardScaler\n",
+    "from sklearn.decomposition import PCA\n",
+    "from sklearn.impute import SimpleImputer\n",
+    "from sklearn.experimental import enable_iterative_imputer\n",
+    "from sklearn.impute import IterativeImputer\n",
+    "import seaborn as sns\n",
+    "from sklearn.model_selection import train_test_split\n",
+    "from sklearn.feature_selection import RFE\n",
+    "from sklearn.ensemble import RandomForestClassifier\n",
+    "from sklearn.metrics import balanced_accuracy_score, classification_report, confusion_matrix, roc_curve, roc_auc_score\n",
+    "from sklearn.linear_model import LogisticRegression"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Required data"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "To run the tutorial, you will need the following files, available in the 'data/features' folder of the *precision-medicine-toolbox* repository:  \n",
+    "- '*extended_clinical_df.xlsx*' - this is the clinical data file provided with the Lung1 dataset (Aerts et al., 2014); we added binary variables of 1-, 1.5-, and 2-years survival, based on the presented data,  \n",
+    "- '*extracted_features_full.xlsx*' - this is a file with the PyRadiomic features values (can be extracted in the imaging module tutorial) for **all** the patients from Lung1 dataset."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Exploratory analysis"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "If you have 2 classes in your dataset, the following functionality is availabe for your analysis. We will divide Lung1 dataset by 1 year survival label, therefore having 2 classes."
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Set up the parameters to get the data:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "parameters = {\n",
+    "    'feature_path': \"extracted_features_full.xlsx\", # path to csv/xls file with features\n",
+    "    'outcome_path': \"extended_clinical_df.xlsx\", #path to csv/xls file with outcome\n",
+    "    'patient_column': 'Patient', # name of column with patient ID\n",
+    "    'patient_in_outcome_column': 'PatientID', # name of column with patient ID in clinical data file\n",
+    "    'outcome_column': '1yearsurvival' # name of outcome column\n",
+    "}"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Initialise the feature set (you will see a short summary):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs = AnalysisBox(**parameters)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Print some attributes of the feature set - first 10 patient IDs and first 10 feature names:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print ('Patient IDs: ', fs._patient_name[:10])\n",
+    "print ('Total patients: ', len(fs._patient_name))\n",
+    "print ('\\nFeature names: ', fs._feature_column[:10])\n",
+    "print ('Total features: ', len(fs._feature_column))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Print the head of the composed dataframe, containing both the variables and the outcome:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs._feature_outcome_dataframe.head(5)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize feature values distribution in classes (will pop up in an interactive .html report):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.plot_distribution(fs._feature_column)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize mutual feature correlation coefficient (Spearman's) matrix (in .html report):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.plot_correlation_matrix(fs._feature_column)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualize Mann-Whitney (Bonferroni corrected) p-values for binary classes test (in .html report):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.plot_MW_p(fs._feature_column)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Vizualize univariate ROC curves:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.plot_univariate_roc(fs._feature_column, auc_threshold=0.70)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Calculate the basic statistics for each feature: number of NaN, mean, std, min, max; if applicable: MW-p, univariate ROC AUC, volume correlation:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.calculate_basic_stats(volume_feature='original_shape_VoxelVolume')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Check the excel table:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print('Basic statistics for each feature')\n",
+    "pd.read_excel('extracted_features_full_basic_stats.xlsx')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Volume analysis will show you if your features have a high correlation to volume and if volume itself is a predictive feature in separation of 2 classes. You need to have a volume feature in your dataset and send it as a function parameter (in our case it is *'original_shape_VoxelVolume'*). "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fs.volume_analysis(volume_feature='original_shape_VoxelVolume')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Outliers detection"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Now we are preparing the data, which is ouside of the toolbox functionality, therefore, we will present the features and outcomes in separate dataframes,"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "data_all = fs._feature_dataframe.copy().drop('ROI', axis=1)\n",
+    "outcome_all = fs._outcome"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "We already know that we have missing values, so we will perform imputation with mean feature values to check the dataset for outliers:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "imp = SimpleImputer(missing_values=np.nan, strategy='mean')\n",
+    "imp.fit(data_all)\n",
+    "x_imp = imp.transform(data_all)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Rescaling the values for PCA:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "x_stand_scaled = StandardScaler().fit_transform(x_imp)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Performing PCA transformation to present every observation in 2D;"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "pca = PCA(n_components=2)\n",
+    "principalComponents = pca.fit_transform(x_stand_scaled)\n",
+    "principalDf = pd.DataFrame(data = principalComponents, columns = ['principal component 1', 'principal component 2'])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Plotting the observations in 2D space:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "plt.scatter(principalDf['principal component 1'], principalDf['principal component 2'])\n",
+    "plt.xlabel('principal component 1')\n",
+    "plt.ylabel('principal component 2')\n",
+    "plt.title('2 component PCA')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "performing the same steps for 1-component decomposition:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "pca_1D = PCA(n_components=1)\n",
+    "principalComponents_1D = pca_1D.fit_transform(x_stand_scaled)\n",
+    "\n",
+    "plt.hist(principalComponents_1D, bins = 150)\n",
+    "plt.xlabel('principal component 1')\n",
+    "plt.title('1 component PCA')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Fixing some discovered findings:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "data_all.drop(index=['LUNG1-014_000000_GTV-1_mask'], inplace=True)\n",
+    "outcome_all.drop(index=['LUNG1-014_000000_GTV-1_mask'], inplace=True)\n",
+    "\n",
+    "data_all.shape"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Visualizing feature distributions ib borplots (quartile outliers detection):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for i in range (0, len(fs._feature_column)-1):\n",
+    "    \n",
+    "    ax = sns.boxplot(data=data_all[fs._feature_column[i]], orient=\"h\")\n",
+    "    plt.title(fs._feature_column[i])\n",
+    "    plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "The other approach for outliers detection - based on Z-scoring:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def z_score_method(df, variable_name):\n",
+    "    \n",
+    "    columns = df.columns\n",
+    "    z = np.abs(stats.zscore(df))\n",
+    "    threshold = 3\n",
+    "    outlier = []\n",
+    "    index=0\n",
+    "    for item in range(len(columns)):\n",
+    "        if columns[item] == variable_name:\n",
+    "            index = item\n",
+    "    for i, v in enumerate(z[:, index]):\n",
+    "        if v > threshold:\n",
+    "            outlier.append(i)\n",
+    "        else:\n",
+    "            continue\n",
+    "    return outlier"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Let's identify indices of the patients, who have outliers for every feature value:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "for i in range (0, len(fs._feature_column)-1):\n",
+    "    \n",
+    "    outlier_z = z_score_method(data_all, fs._feature_column[i])\n",
+    "    print(fs._feature_column[i], outlier_z)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Dropping a feature with duplicated value:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "data_all.drop('original_gldm_LargeDependenceHighGrayLevelEmphasis', axis=1, inplace=True)\n",
+    "\n",
+    "data_all.shape"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Feature imputation"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Convertion DataFrame into array (input for the Python package):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "X = np.array(data_all)\n",
+    "y = np.array(outcome_all)\n",
+    "\n",
+    "print (X.shape, y.shape)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Imputation with mean:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "imp_simple = SimpleImputer(missing_values=np.nan, strategy='mean')\n",
+    "imp_simple.fit(X)\n",
+    "X_imp_simple = imp_simple.transform(X)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Iterative imputation with regression model:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "imp_it = IterativeImputer(max_iter=10, random_state=0)\n",
+    "imp_it.fit(X)\n",
+    "X_imp_it = imp_it.transform(X)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Creating two DataFrames with different imputation strategies:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "data_all_simple = data_all.copy()\n",
+    "data_all_it = data_all.copy()\n",
+    "\n",
+    "for i in range (0, len(np.where(np.isnan(X))[0])):\n",
+    "    x = np.where(np.isnan(X))[0][i]\n",
+    "    y = np.where(np.isnan(X))[1][i]\n",
+    "    data_all_simple.iloc[x, y] = X_imp_simple[x, y]\n",
+    "    data_all_it.iloc[x, y] = X_imp_it[x, y]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "After data preparation, final list of the features to select from:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "features = data_all.columns\n",
+    "\n",
+    "len(features)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Feature selection"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Data split into train and test sets (stratifid by outcome):"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "y_train, y_test = train_test_split(outcome_all, test_size=0.33, random_state=42, stratify=outcome_all)\n",
+    "\n",
+    "data_train_simple = data_all_simple.loc[y_train.index]\n",
+    "data_test_simple = data_all_simple.loc[y_test.index]\n",
+    "\n",
+    "data_train_it = data_all_it.loc[y_train.index]\n",
+    "data_test_it = data_all_it.loc[y_test.index]"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Removing highly correlated features is a controversial step aimed to reduce the dimensionality of the feature space. Highly correlated features needlessly inflate the dimensionality of feature space. The idea is that highly correlated features can be grouped together and represented by one representative feature.  For features pairs with a high Spearman correlation (r > 0.9) the feature with the highest mean correlation with all remaining features is removed."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def selectNonIntercorrelated(df_in, ftrs, corr_th):\n",
+    "    \n",
+    "    # selection of the features, which are not 'highly intercorrelated' (correlation is defined by Spearman coefficient);\n",
+    "    # pairwise correlation between all the features is calculated, \n",
+    "    # from each pair of features, considered as intercorrelated, \n",
+    "    # feature with maximum sum of all the pairwise Spearman correlation coefficients is a 'candidate to be dropped'\n",
+    "    # for stability of the selected features, bootstrapping approach is used: \n",
+    "    # in each bootstrap split, the random subsample, stratified in relation to outcome, \n",
+    "    # is formed, based on original observations from input dataset;\n",
+    "    # in each bootstrap split, 'candidates to be dropped' are detected;\n",
+    "    # for each input feature, its frequency to appear as 'candidate to be dropped' is calculated,\n",
+    "    # features, appeared in 50 % of splits as 'candidate to be dropped', are excluded from feature set\n",
+    "    \n",
+    "    # input:\n",
+    "    # df_in - input dataframe, containing feature values (dataframe, columns = features, rows = observations),\n",
+    "    # ftrs - list of dataframe features, used in analysis (list of feature names - string variables),\n",
+    "    # corr_th - threshold for Spearman correlation coefficient, defining each pair of features as intercorrelated (float)\n",
+    "    \n",
+    "    # output:\n",
+    "    # non_intercorrelated_features - list of names of features, which did not appear as inter-correlated\n",
+    "    \n",
+    "    corr_matrix = df_in.corr(method='spearman').abs()\n",
+    "    mean_absolute_corr = corr_matrix.mean()\n",
+    "    intercorrelated_features_set = []\n",
+    "    upper = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(np.bool))\n",
+    "    high_corrs = upper.where(upper > corr_th).dropna(how='all', axis=1).dropna(how='all', axis=0)\n",
+    "\n",
+    "    for feature in high_corrs.columns:\n",
+    "        mean_absolute_main = mean_absolute_corr[feature]\n",
+    "        correlated_with_feature = high_corrs[feature].index[pd.notnull(high_corrs[feature])]\n",
+    "        for each_correlated_feature in correlated_with_feature:\n",
+    "            mean_absolute = mean_absolute_corr[each_correlated_feature]\n",
+    "            if mean_absolute_main > mean_absolute:\n",
+    "                if feature not in intercorrelated_features_set:\n",
+    "                    intercorrelated_features_set.append(feature)\n",
+    "            else:\n",
+    "                if each_correlated_feature not in intercorrelated_features_set:\n",
+    "                    intercorrelated_features_set.append(each_correlated_feature)\n",
+    "\n",
+    "    non_intercorrelated_features_set = [e for e in ftrs if e not in intercorrelated_features_set] \n",
+    "    \n",
+    "    print ('Non intercorrelated features: ', non_intercorrelated_features_set)\n",
+    "    \n",
+    "    return non_intercorrelated_features_set"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Selecting non-inter-correlated features:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "features_simple_non_intercorrelated = selectNonIntercorrelated(data_train_simple, features, 0.9)\n",
+    "features_it_non_intercorrelated = selectNonIntercorrelated(data_train_it, features, 0.9)\n",
+    "print ('Number of non-intercorrelated features (simple, iterative): ', \n",
+    "       len(features_simple_non_intercorrelated), \n",
+    "       len(features_it_non_intercorrelated))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "There are some rules of thumb on how many features we need in the end:  \n",
+    "* $int(\\frac{N_{samples}}{10})$ (Abu-Mostafa, Y. S., Magdon-Ismail, M., & Lin, H. T. (2012). Learning from data (Vol. 4, p. 4). New York: AMLBook.)  \n",
+    "* $\\sqrt{N_{samples}}$ (Hua, J., Xiong, Z., Lowey, J., Suh, E., & Dougherty, E. R. (2005). Optimal number of features as a function of sample size for various classification rules. Bioinformatics, 21(8), 1509-1515.)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print ('Nmber of samples in training dataset: ', len(y_train))\n",
+    "print ('Number of features to select according to Abu-Mostafa: ', int(len(y_train)/10))\n",
+    "print ('Number of features to select according to Hua: ', int(len(y_train)**0.5))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Below we implement Recursive Feature Elimination, RFE (https://scikit-learn.org/stable/modules/generated/sklearn.feature_selection.RFE.html), based on Random Forest Classifier, RFC (https://scikit-learn.org/stable/modules/generated/sklearn.ensemble.RandomForestClassifier.html)."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "def selectRFE(df_in, ftrs, outcome, n_to_select):\n",
+    "    \n",
+    "    estimator = RandomForestClassifier(n_estimators=100, random_state=np.random.seed(0))\n",
+    "    selector = RFE(estimator, n_features_to_select=n_to_select, step=1)\n",
+    "    selector = selector.fit(df_in[ftrs], outcome)\n",
+    "    support = selector.get_support()\n",
+    "    selected_features_set = df_in[ftrs].loc[:, support].columns.tolist()\n",
+    "    \n",
+    "    return selected_features_set"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Final feature sets for both imputation methods:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "features_simple_rfe = selectRFE(data_train_simple, features_simple_non_intercorrelated, y_train, 9)\n",
+    "features_it_rfe = selectRFE(data_train_it, features_it_non_intercorrelated, y_train, 9)\n",
+    "\n",
+    "print (features_simple_rfe)\n",
+    "print (features_it_rfe)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Modeling"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Model 1: Random Forest Classifier  \n",
+    "Training on train set, calculating outcomes for test set."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "rfc = RandomForestClassifier(n_estimators=100, random_state=np.random.seed(0))\n",
+    "rfc.fit(data_train_simple[features_simple_rfe], y_train)\n",
+    "y_pred_rfc = rfc.predict(data_test_simple[features_simple_rfe])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Some classification metrics:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print (classification_report(y_test, y_pred_rfc))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Typical classification metric ROC AUC score:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fpr, tpr, _ = roc_curve(y_test, rfc.predict_proba(data_test_simple[features_simple_rfe])[:, 1], pos_label='1')\n",
+    "roc_auc = roc_auc_score(y_test, rfc.predict_proba(data_test_simple[features_simple_rfe])[:, 1])\n",
+    "\n",
+    "plt.plot(fpr, tpr)\n",
+    "plt.title('RFC ROC curve (AUC = {})'.format(roc_auc))\n",
+    "plt.xlabel('FPR')\n",
+    "plt.ylabel('TPR')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Confusion matrix:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "cm = confusion_matrix(y_test, y_pred_rfc)\n",
+    "f = sns.heatmap(cm, annot=True)\n",
+    "plt.title('Confusion matrix for RFC')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Model 2: Logistic Regression Classifier\n",
+    "Training and calculating labels for test set."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "lrc = LogisticRegression(random_state=0).fit(data_train_simple[features_simple_rfe], y_train)\n",
+    "y_pred_lrc = lrc.predict(data_test_simple[features_simple_rfe])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Classification metrics"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "print (classification_report(y_test, y_pred_lrc))"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "ROC + ROC AUC:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "fpr, tpr, _ = roc_curve(y_test, lrc.predict_proba(data_test_simple[features_simple_rfe])[:, 1], pos_label='1')\n",
+    "roc_auc = roc_auc_score(y_test, lrc.predict_proba(data_test_simple[features_simple_rfe])[:, 1])\n",
+    "\n",
+    "plt.plot(fpr, tpr)\n",
+    "plt.title('LRC ROC curve (AUC = {})'.format(roc_auc))\n",
+    "plt.xlabel('FPR')\n",
+    "plt.ylabel('TPR')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "Confusion matrix:"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "cm = confusion_matrix(y_test, y_pred_lrc)\n",
+    "f = sns.heatmap(cm, annot=True)\n",
+    "plt.title('Confusion matrix for LRC')\n",
+    "plt.show()"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "The same modeling steps you can perform for iterative imputed data to compare the imputation methods."
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.7.1"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 2
+}
